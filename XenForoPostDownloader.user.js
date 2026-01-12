@@ -4,7 +4,7 @@
 // @namespace https://github.com/SkyCloudDev
 // @author SkyCloudDev
 // @description Downloads images and videos from posts
-// @version 3.9
+// @version 3.10
 // @updateURL
 // @downloadURL
 // @icon https://simp4.host.church/simpcityIcon192.png
@@ -3135,6 +3135,9 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
  * @param post
  */
 const addDuplicateTabLink = post => {
+    if (post.parentNode.querySelector('.duplicate-tab')) {
+        return;
+    }
     const span = document.createElement('span');
     span.innerHTML = '<i class="fa fa-copy"></i> Duplicate Tab';
 
@@ -3155,6 +3158,9 @@ const addDuplicateTabLink = post => {
  * @param post
  */
 const addShowDownloadPageBtnLink = post => {
+    if (post.parentNode.querySelector('.show-download-page')) {
+        return;
+    }
     const span = document.createElement('span');
     span.innerHTML = '<i class="fa fa-arrow-up"></i> Download Page';
 
@@ -3233,6 +3239,469 @@ async function cyberdrop_helper(file) {
 
 const parsedPosts = [];
 const selectedPosts = [];
+const processedPostIds = new Set();
+
+const POST_WRAP_SEL = '.block--messages .block-body';
+const POST_SEL = '.message';
+const NEXT_SEL = 'a.pageNav-jump--next';
+const NAV_SEL = 'nav.pageNavWrapper';
+const MEDIA_SEL = `
+    div.bbImageWrapper,
+    img,
+    video,
+    iframe,
+    a[href$=".jpg"],
+    a[href$=".jpeg"],
+    a[href$=".png"],
+    a[href$=".gif"],
+    a[href$=".webm"],
+    a[href$=".mp4"],
+    a[href^="https://jpg"]`.replace(/\s+/g, ' ');
+
+let downloadPageTooltip = null;
+let downloadPageButton = null;
+
+const infiniteScrollState = {
+    sentinel: null,
+    io: null,
+    busy: false,
+    nextURL: null,
+};
+
+const createDefaultPostSettings = () => ({
+    zipped: true,
+    flatten: false,
+    generateLinks: false,
+    generateLog: false,
+    skipDuplicates: false,
+    skipDownload: false,
+    verifyBunkrLinks: false,
+    output: [],
+});
+
+const ensureDownloadPageButton = () => {
+    if (downloadPageButton) {
+        return downloadPageButton;
+    }
+
+    downloadPageButton = addDownloadPageButton();
+
+    downloadPageButton.addEventListener('click', e => {
+        e.preventDefault();
+
+        selectedPosts
+            .filter(s => s.enabled)
+            .forEach(s => {
+                downloadPost(
+                    s.post.parsedPost,
+                    s.post.parsedHosts,
+                    s.post.enabledHostsCB,
+                    s.post.resolvers,
+                    s.post.getSettingsCB,
+                    s.post.statusUI,
+                    s.post.postDownloadCallbacks,
+                );
+            });
+    });
+
+    return downloadPageButton;
+};
+
+const handleDownloadPageTooltipShown = () => {
+    parsedPosts
+        .filter(p => p.parsedHosts.length)
+        .forEach(post => {
+            const { postId, contentContainer } = post.parsedPost;
+            const contentTarget = h.element(`#post-content-${postId}`);
+            if (contentTarget && !contentTarget.dataset.tooltipBound) {
+                contentTarget.dataset.tooltipBound = 'true';
+                ui.tooltip(
+                    contentTarget,
+                    `<div style="overflow-y: auto; background: #242323; padding: 16px; width: 500px; max-height: 500px">
+                          ${contentContainer.innerHTML}
+                         </div>`,
+                    { placement: 'right', offset: [10, 15] },
+                );
+            }
+
+            const checkbox = document.querySelector(`#config-download-post-${postId}`);
+            if (checkbox && !checkbox.dataset.changeBound) {
+                checkbox.dataset.changeBound = 'true';
+                checkbox.addEventListener('change', e => {
+                    const selectedPost = selectedPosts.find(s => s.post.parsedPost.postId === postId);
+                    if (selectedPost) {
+                        selectedPost.enabled = e.target.checked;
+                    }
+
+                    const checkAllCB = h.element('#config-toggle-all-posts');
+                    checkAllCB.checked = selectedPosts.filter(s => s.enabled).length === parsedPosts.length;
+                });
+            }
+        });
+
+    const toggleAll = h.element('#config-toggle-all-posts');
+    if (toggleAll && !toggleAll.dataset.changeBound) {
+        toggleAll.dataset.changeBound = 'true';
+        toggleAll.addEventListener('change', async e => {
+            e.preventDefault();
+
+            const checked = e.target.checked;
+
+            const postCheckboxes = parsedPosts
+                .filter(p => p.parsedHosts.length)
+                .map(p => p.parsedPost)
+                .flatMap(p => h.element(`#config-download-post-${p.postId}`));
+
+            const checkedPostCheckboxes = postCheckboxes.filter(el => el.checked);
+            const unCheckedPostCheckboxes = postCheckboxes.filter(el => !el.checked);
+
+            if (checked) {
+                unCheckedPostCheckboxes.forEach(c => c.click());
+            } else {
+                checkedPostCheckboxes.forEach(c => c.click());
+            }
+        });
+    }
+};
+
+const refreshDownloadPageTooltip = () => {
+    if (!parsedPosts.filter(p => p.parsedHosts.length).length) {
+        return;
+    }
+
+    const btnDownloadPage = ensureDownloadPageButton();
+    const color = ui.getTooltipBackgroundColor();
+
+    let html = ui.forms.createCheckbox('config-toggle-all-posts', settings.ui.checkboxes.toggleAllCheckboxLabel, false);
+
+    parsedPosts
+        .filter(p => p.parsedHosts.length)
+        .forEach(post => {
+            const { postId, postNumber, textContent } = post.parsedPost;
+            const threadTitle = parsers.thread.parseTitle();
+
+            let defaultPostContent = textContent.trim().replace('​', '');
+            const ellipsedText = h.limit(defaultPostContent === '' ? threadTitle : defaultPostContent, 20);
+
+            const summary = `<a id="post-content-${postId}" href="#post-${postId}" style="color: dodgerblue"> ${ellipsedText} </a>`;
+            html += ui.forms.createCheckbox(`config-download-post-${postId}`, `Post #${postNumber} ${summary}`, false);
+        });
+
+    html = `${ui.forms.createRow(ui.forms.createLabel('Post Selection'))} ${html}`;
+    const content = ui.forms.config.page.createForm(color, html);
+
+    if (!downloadPageTooltip) {
+        downloadPageTooltip = ui.tooltip(btnDownloadPage, content, {
+            placement: 'bottom',
+            interactive: true,
+            onShown: handleDownloadPageTooltipShown,
+        });
+    } else {
+        downloadPageTooltip.setContent(content);
+        downloadPageTooltip.setProps({ onShown: handleDownloadPageTooltipShown });
+    }
+};
+
+const refreshFilters = () => {
+    const box = document.querySelector(POST_WRAP_SEL);
+    const tMed = document.getElementById('filterMediaToggle');
+    const tTxt = document.getElementById('filterTxtToggle');
+
+    if (!box || !tMed || !tTxt) {
+        return;
+    }
+
+    const wantMed = tMed.checked;
+    const wantTxt = tTxt.checked;
+
+    box.querySelectorAll(POST_SEL).forEach(post => {
+        const messageContent = post.querySelector('.message-content > .message-userContent');
+        if (!messageContent) {
+            return;
+        }
+        const wrapper = messageContent.querySelector('.bbWrapper') || messageContent;
+
+        if (!wrapper.dataset.origHtml) {
+            wrapper.dataset.origHtml = wrapper.innerHTML;
+        }
+        wrapper.innerHTML = wrapper.dataset.origHtml;
+
+        post.style.display = '';
+        wrapper.querySelectorAll('[data-filter-pruned]').forEach(el => {
+            el.removeAttribute('data-filter-pruned');
+            el.style.display = '';
+        });
+
+        if (!wantMed && !wantTxt) {
+            return;
+        }
+
+        const mediaEls = Array.from(wrapper.querySelectorAll(MEDIA_SEL));
+        const hasMedia = mediaEls.length > 0;
+
+        const temp = wrapper.cloneNode(true);
+        temp.querySelectorAll(MEDIA_SEL).forEach(el => el.remove());
+        const hasText = temp.textContent.trim().length > 0;
+
+        if (wantMed) {
+            if (!hasMedia) {
+                post.style.display = 'none';
+                return;
+            }
+            wrapper.childNodes.forEach(node => {
+                if (node.nodeType === 3) {
+                    if (/\S/.test(node.nodeValue)) {
+                        node.textContent = '';
+                    }
+                } else if (!node.matches(MEDIA_SEL) && !node.querySelector(MEDIA_SEL)) {
+                    node.setAttribute('data-filter-pruned', '');
+                    node.style.display = 'none';
+                }
+            });
+            return;
+        }
+
+        if (wantTxt) {
+            if (!hasText) {
+                post.style.display = 'none';
+                return;
+            }
+            mediaEls.forEach(el => {
+                el.setAttribute('data-filter-pruned', '');
+                el.style.display = 'none';
+            });
+        }
+    });
+};
+
+const setupFilterToggles = () => {
+    const toggles = [
+        { id: 'infScrollToggle', txt: 'Infinite scroll' },
+        { id: 'filterMediaToggle', txt: 'Filter for media' },
+        { id: 'filterTxtToggle', txt: 'Filter for text' },
+    ];
+    const cbTpl = ({ id, txt }) =>
+        `<label style="margin-left:8px;font-size:90%;cursor:pointer;white-space:nowrap;">
+       <input type="checkbox" id="${id}" style="vertical-align:middle;margin-right:4px;">${txt}
+     </label>`;
+
+    const nav = document.querySelector(NAV_SEL);
+    if (!nav) {
+        return;
+    }
+    if (!document.getElementById('infScrollToggle')) {
+        toggles.forEach(t => nav.insertAdjacentHTML('beforeend', cbTpl(t)));
+    }
+
+    const tInf = document.getElementById('infScrollToggle');
+    const tMed = document.getElementById('filterMediaToggle');
+    const tTxt = document.getElementById('filterTxtToggle');
+
+    const load = cb => cb && (cb.checked = localStorage.getItem(cb.id) === 'true');
+    const save = cb => localStorage.setItem(cb.id, cb.checked);
+
+    [tInf, tMed, tTxt].forEach(load);
+
+    if (tInf) {
+        tInf.addEventListener('change', () => {
+            save(tInf);
+            if (tInf.checked) {
+                enableInfiniteScroll();
+            } else {
+                disableInfiniteScroll();
+            }
+        });
+    }
+
+    if (tMed && tTxt) {
+        tMed.addEventListener('change', () => {
+            if (tMed.checked) {
+                tTxt.checked = false;
+                save(tTxt);
+            }
+            save(tMed);
+            refreshFilters();
+        });
+        tTxt.addEventListener('change', () => {
+            if (tTxt.checked) {
+                tMed.checked = false;
+                save(tMed);
+            }
+            save(tTxt);
+            refreshFilters();
+        });
+    }
+
+    if (tInf && tInf.checked) {
+        enableInfiniteScroll();
+    }
+};
+
+const getNextPageUrl = ctx => {
+    const anchor = ctx.querySelector(NEXT_SEL);
+    return anchor ? anchor.href : null;
+};
+
+const enableInfiniteScroll = () => {
+    const box = document.querySelector(POST_WRAP_SEL);
+    if (!box || infiniteScrollState.io) {
+        return;
+    }
+    infiniteScrollState.nextURL = getNextPageUrl(document);
+    if (!infiniteScrollState.nextURL) {
+        return;
+    }
+
+    infiniteScrollState.sentinel = document.createElement('div');
+    infiniteScrollState.sentinel.setAttribute('data-infinite-scroll-sentinel', 'true');
+    box.appendChild(infiniteScrollState.sentinel);
+
+    infiniteScrollState.io = new IntersectionObserver(
+        entries => entries[0].isIntersecting && fetchNextPage(),
+        { rootMargin: '1000px' },
+    );
+    infiniteScrollState.io.observe(infiniteScrollState.sentinel);
+};
+
+const disableInfiniteScroll = () => {
+    if (infiniteScrollState.io) {
+        infiniteScrollState.io.disconnect();
+    }
+    infiniteScrollState.io = null;
+    infiniteScrollState.sentinel?.remove();
+    infiniteScrollState.sentinel = null;
+    infiniteScrollState.busy = false;
+};
+
+const fetchNextPage = async () => {
+    if (infiniteScrollState.busy || !infiniteScrollState.nextURL) {
+        return;
+    }
+    infiniteScrollState.busy = true;
+    try {
+        const html = await (await fetch(infiniteScrollState.nextURL, { credentials: 'include' })).text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const box = document.querySelector(POST_WRAP_SEL);
+        if (!box) {
+            disableInfiniteScroll();
+            return;
+        }
+        const sentinel = infiniteScrollState.sentinel;
+        doc.querySelectorAll(POST_SEL).forEach(post => {
+            box.insertBefore(post, sentinel);
+            const attribution = post.querySelector('.message-attribution-opposite');
+            if (attribution) {
+                registerPost(attribution);
+            }
+        });
+        infiniteScrollState.nextURL = getNextPageUrl(doc);
+        if (!infiniteScrollState.nextURL) {
+            disableInfiniteScroll();
+        }
+        refreshFilters();
+    } catch (e) {
+        console.error('Infinite scroll error', e);
+        disableInfiniteScroll();
+    } finally {
+        infiniteScrollState.busy = false;
+    }
+};
+
+const registerPost = post => {
+    const parsedPost = parsers.thread.parsePost(post);
+    if (!parsedPost || processedPostIds.has(parsedPost.postId)) {
+        return;
+    }
+
+    processedPostIds.add(parsedPost.postId);
+
+    const postSettings = createDefaultPostSettings();
+    const { content, contentContainer } = parsedPost;
+
+    addDuplicateTabLink(post);
+    addShowDownloadPageBtnLink(post);
+
+    const parsedHosts = parsers.hosts.parseHosts(content);
+
+    const getEnabledHostsCB = parsedHosts => parsedHosts.filter(host => host.enabled);
+
+    if (!parsedHosts.length) {
+        return;
+    }
+
+    const getTotalDownloadableResourcesForPostCB = parsedHosts => {
+        return parsedHosts.filter(host => host.enabled && host.resources.length).reduce((acc, host) => acc + host.resources.length, 0);
+    };
+
+    const { btn: btnDownloadPost } = ui.buttons.addDownloadPostButton(post);
+    const totalResources = parsedHosts.reduce((acc, host) => acc + host.resources.length, 0);
+    const checkedLength = getTotalDownloadableResourcesForPostCB(parsedHosts);
+    btnDownloadPost.innerHTML = `🡳 Download (${checkedLength}/${totalResources})`;
+
+    const { el: statusText } = ui.labels.status.createStatusLabel();
+    const filePBar = ui.pBars.createFileProgressBar();
+    const totalPBar = ui.pBars.createTotalProgressBar();
+
+    contentContainer.prepend(totalPBar);
+    contentContainer.prepend(filePBar);
+    contentContainer.prepend(statusText);
+
+    h.hide(statusText);
+    h.hide(filePBar);
+    h.hide(totalPBar);
+
+    const onFormSubmitCB = data => {
+        const { tippyInstance } = data;
+        tippyInstance.hide();
+    };
+
+    ui.forms.config.post.createPostConfigForm(
+        parsedPost,
+        parsedHosts,
+        `${h.buildPostBaseName(parsedPost.postDate, parsers.thread.parseTitle(), parsedPost.postNumber)}.zip`,
+        postSettings,
+        onFormSubmitCB,
+        getTotalDownloadableResourcesForPostCB,
+        btnDownloadPost,
+    );
+
+    const statusUI = {
+        status: statusText,
+        filePB: filePBar,
+        totalPB: totalPBar,
+    };
+
+    const postDownloadCallbacks = {
+        onComplete: (total, completed) => {
+            if (total > 0 && completed > 0) {
+                registerPostReaction(parsedPost.footer);
+            }
+        },
+    };
+
+    let getSettingsCB = () => postSettings;
+
+    parsedPosts.push({
+        parsedPost,
+        parsedHosts,
+        enabledHostsCB: getEnabledHostsCB,
+        resolvers,
+        getSettingsCB,
+        statusUI,
+        postDownloadCallbacks,
+    });
+
+    if (!selectedPosts.find(s => s.post.parsedPost.postId === parsedPost.postId)) {
+        selectedPosts.push({ post: parsedPosts[parsedPosts.length - 1], enabled: false });
+    }
+
+    btnDownloadPost.addEventListener('click', e => {
+        e.preventDefault();
+        downloadPost(parsedPost, parsedHosts, getEnabledHostsCB, resolvers, getSettingsCB, statusUI, postDownloadCallbacks);
+    });
+
+    refreshDownloadPageTooltip();
+};
 
 (function () {
     window.addEventListener('beforeunload', e => {
@@ -3282,192 +3751,11 @@ const selectedPosts = [];
         init.injectCustomStyles();
 
         h.elements('.message-attribution-opposite').forEach(post => {
-            const settings = {
-                zipped: true,
-                flatten: false,
-                generateLinks: false,
-                generateLog: false,
-                skipDuplicates: false,
-                skipDownload: false,
-                verifyBunkrLinks: false,
-                output: [],
-            };
-
-            const parsedPost = parsers.thread.parsePost(post);
-
-            const { content, contentContainer } = parsedPost;
-
-            addDuplicateTabLink(post);
-            addShowDownloadPageBtnLink(post);
-
-            const parsedHosts = parsers.hosts.parseHosts(content);
-
-            const getEnabledHostsCB = parsedHosts => parsedHosts.filter(host => host.enabled);
-
-            if (!parsedHosts.length) {
-                return;
-            }
-
-            const getTotalDownloadableResourcesForPostCB = parsedHosts => {
-                return parsedHosts.filter(host => host.enabled && host.resources.length).reduce((acc, host) => acc + host.resources.length, 0);
-            };
-
-            // Create and attach the download button to post.
-            const { btn: btnDownloadPost } = ui.buttons.addDownloadPostButton(post);
-            const totalResources = parsedHosts.reduce((acc, host) => acc + host.resources.length, 0);
-            const checkedLength = getTotalDownloadableResourcesForPostCB(parsedHosts);
-            btnDownloadPost.innerHTML = `🡳 Download (${checkedLength}/${totalResources})`;
-
-            // Create download status / progress elements.
-            const { el: statusText } = ui.labels.status.createStatusLabel();
-            const filePBar = ui.pBars.createFileProgressBar();
-            const totalPBar = ui.pBars.createTotalProgressBar();
-
-            contentContainer.prepend(totalPBar);
-            contentContainer.prepend(filePBar);
-            contentContainer.prepend(statusText);
-
-            h.hide(statusText);
-            h.hide(filePBar);
-            h.hide(totalPBar);
-
-            const onFormSubmitCB = data => {
-                const { tippyInstance } = data;
-                tippyInstance.hide();
-            };
-
-            ui.forms.config.post.createPostConfigForm(
-                parsedPost,
-                parsedHosts,
-                `${h.buildPostBaseName(parsedPost.postDate, parsers.thread.parseTitle(), parsedPost.postNumber)}.zip`,
-                settings,
-                onFormSubmitCB,
-                getTotalDownloadableResourcesForPostCB,
-                btnDownloadPost,
-            );
-
-            const statusUI = {
-                status: statusText,
-                filePB: filePBar,
-                totalPB: totalPBar,
-            };
-
-            const postDownloadCallbacks = {
-                onComplete: (total, completed) => {
-                    if (total > 0 && completed > 0) {
-                        registerPostReaction(parsedPost.footer);
-                    }
-                },
-            };
-
-            let getSettingsCB = () => settings;
-
-            parsedPosts.push({
-                parsedPost,
-                parsedHosts,
-                enabledHostsCB: getEnabledHostsCB,
-                resolvers,
-                getSettingsCB,
-                statusUI,
-                postDownloadCallbacks,
-            });
-
-            btnDownloadPost.addEventListener('click', e => {
-                e.preventDefault();
-                downloadPost(parsedPost, parsedHosts, getEnabledHostsCB, resolvers, getSettingsCB, statusUI, postDownloadCallbacks);
-            });
+            registerPost(post);
         });
 
-        if (parsedPosts.filter(p => p.parsedHosts.length).length > 0) {
-            const btnDownloadPage = addDownloadPageButton();
-
-            btnDownloadPage.addEventListener('click', e => {
-                e.preventDefault();
-
-                selectedPosts
-                    .filter(s => s.enabled)
-                    .forEach(s => {
-                    downloadPost(
-                        s.post.parsedPost,
-                        s.post.parsedHosts,
-                        s.post.enabledHostsCB,
-                        s.post.resolvers,
-                        s.post.getSettingsCB,
-                        s.post.statusUI,
-                        s.post.postDownloadCallbacks,
-                    );
-                });
-            });
-
-            // TODO: Extract to ui.js
-            const color = ui.getTooltipBackgroundColor();
-
-            let html = ui.forms.createCheckbox('config-toggle-all-posts', settings.ui.checkboxes.toggleAllCheckboxLabel, false);
-
-            parsedPosts
-                .filter(p => p.parsedHosts.length)
-                .forEach(post => {
-                const { postId, postNumber, textContent } = post.parsedPost;
-
-                selectedPosts.push({ post, enabled: false });
-
-                const threadTitle = parsers.thread.parseTitle();
-
-                let defaultPostContent = textContent.trim().replace('​', '');
-
-                const ellipsedText = h.limit(defaultPostContent === '' ? threadTitle : defaultPostContent, 20);
-
-                const summary = `<a id="post-content-${postId}" href="#post-${postId}" style="color: dodgerblue"> ${ellipsedText} </a>`;
-                html += ui.forms.createCheckbox(`config-download-post-${postId}`, `Post #${postNumber} ${summary}`, false);
-            });
-
-            html = `${ui.forms.createRow(ui.forms.createLabel('Post Selection'))} ${html}`;
-            ui.tooltip(btnDownloadPage, ui.forms.config.page.createForm(color, html), {
-                placement: 'bottom',
-                interactive: true,
-                onShown: () => {
-                    parsedPosts
-                        .filter(p => p.parsedHosts.length)
-                        .forEach(post => {
-                        const { postId, contentContainer } = post.parsedPost;
-                        ui.tooltip(
-                            `#post-content-${postId}`,
-                            `<div style="overflow-y: auto; background: #242323; padding: 16px; width: 500px; max-height: 500px">
-                          ${contentContainer.innerHTML}
-                         </div>`,
-                            { placement: 'right', offset: [10, 15] },
-                        );
-
-                        document.querySelector(`#config-download-post-${postId}`).addEventListener('change', e => {
-                            const selectedPost = selectedPosts.find(s => s.post.parsedPost.postId === postId);
-                            selectedPost.enabled = e.target.checked;
-
-                            const checkAllCB = h.element('#config-toggle-all-posts');
-                            checkAllCB.checked = selectedPosts.filter(s => s.enabled).length === parsedPosts.length;
-                        });
-
-                        h.element('#config-toggle-all-posts').addEventListener('change', async e => {
-                            e.preventDefault();
-
-                            const checked = e.target.checked;
-
-                            const postCheckboxes = parsedPosts
-                            .filter(p => p.parsedHosts.length)
-                            .map(p => p.parsedPost)
-                            .flatMap(p => h.element(`#config-download-post-${p.postId}`));
-
-                            const checkedPostCheckboxes = postCheckboxes.filter(e => e.checked);
-                            const unCheckedPostCheckboxes = postCheckboxes.filter(e => !e.checked);
-
-                            if (checked) {
-                                unCheckedPostCheckboxes.forEach(c => c.click());
-                            } else {
-                                checkedPostCheckboxes.forEach(c => c.click());
-                            }
-                        });
-                    });
-                },
-            });
-        }
+        refreshDownloadPageTooltip();
+        setupFilterToggles();
+        refreshFilters();
     });
 })();
