@@ -4,7 +4,9 @@
 // @namespace https://github.com/SkyCloudDev
 // @author SkyCloudDev
 // @description Downloads images and videos from posts
-// @version 3.8.1 (EDITalt 4)
+// @version 3.9
+// @updateURL https://github.com/SkyCloudDev/ForumPostDownloader/raw/main/dist/build.user.js
+// @downloadURL https://github.com/SkyCloudDev/ForumPostDownloader/raw/main/dist/build.user.js
 // @icon https://simp4.host.church/simpcityIcon192.png
 // @license WTFPL; http://www.wtfpl.net/txt/copying/
 // @match https://simpcity.cr/threads/*
@@ -59,9 +61,9 @@
 // @connect cyberdrop.to
 // @connect cyberfile.su
 // @connect cyberfile.me
-// @connect saint2.su
-// @connect saint2.pk
 // @connect turbovid.cr
+// @connect saint2.su
+// @connect saint2.cr
 // @connect redd.it
 // @connect onlyfans.com
 // @connect i.ibb.co
@@ -274,39 +276,6 @@ const h = {
    */
     ext: path => {
         return !path || path.indexOf('.') < 0 ? null : path.split('.').reverse()[0];
-    },
-    media: {
-        typeFromUrl: url => {
-            if (!url) {
-                return null;
-            }
-            const clean = url.replace(/\?.*/i, '').replace(/#.*/i, '');
-            const ext = h.ext(clean);
-            if (!ext) {
-                return null;
-            }
-            const dotExt = `.${ext.toLowerCase()}`;
-            if (settings.extensions.image.includes(dotExt)) {
-                return 'image';
-            }
-            if (settings.extensions.video.includes(dotExt)) {
-                return 'video';
-            }
-            return null;
-        },
-        isAllowed: (url, mediaSettings) => {
-            if (!mediaSettings || (!mediaSettings.images && !mediaSettings.videos)) {
-                return true;
-            }
-            const type = h.media.typeFromUrl(url);
-            if (type === 'image') {
-                return !!mediaSettings.images;
-            }
-            if (type === 'video') {
-                return !!mediaSettings.videos;
-            }
-            return true;
-        },
     },
     /**
    * @param element
@@ -666,28 +635,8 @@ const parsers = {
 
             const postIdAnchor = post.querySelector('li:last-of-type > a');
             const postId = /(?<=\/post-).*/i.exec(postIdAnchor.getAttribute('href'))[0];
-            const postNumber = postIdAnchor.textContent.replace('#', '').replace(/,/g, '').trim();
-            const timeEl = post.closest('.message-attribution')?.querySelector('time');
-            let postDate = null;
+            const postNumber = postIdAnchor.textContent.replace('#', '').trim();
 
-            if (timeEl) {
-                const datetime = timeEl.getAttribute('datetime');
-                const timestamp = timeEl.getAttribute('data-time');
-                let dateObj = null;
-
-                if (timestamp && /^\d+$/.test(timestamp)) {
-                    dateObj = new Date(Number(timestamp) * 1000);
-                } else if (datetime) {
-                    dateObj = new Date(datetime);
-                }
-
-                if (dateObj && !Number.isNaN(dateObj.getTime())) {
-                    const year = String(dateObj.getFullYear()).slice(-2);
-                    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-                    const day = String(dateObj.getDate()).padStart(2, '0');
-                    postDate = `${year}${month}${day}`;
-                }
-            }
             // Remove the following from the post content:
             // 1. Quotes.
             // 2. CodeBlock headers
@@ -744,7 +693,6 @@ const parsers = {
                 post,
                 postId,
                 postNumber,
-                postDate,
                 pageNumber,
                 spoilers,
                 footer,
@@ -1191,21 +1139,6 @@ const ui = {
           </div>
           `;
                 },
-                createMediaTypeLabel: () => {
-                    return `
-          <div class="menu-row">
-            <div style="font-weight: bold; margin-top:3px; margin-bottom: 4px; color: dodgerblue;">
-                Media Type
-            </div>
-          </div>
-          `;
-                },
-                createMediaImagesCheckbox: (postId, checked) => {
-                    return ui.forms.createCheckbox(`settings-${postId}-media-images`, 'Images', checked);
-                },
-                createMediaVideosCheckbox: (postId, checked) => {
-                    return ui.forms.createCheckbox(`settings-${postId}-media-videos`, 'Videos', checked);
-                },
                 /**
          * @param parsedPost
          * @param parsedHosts
@@ -1245,9 +1178,6 @@ const ui = {
 
                     let formHtml = [
                         window.isFF ? ui.forms.config.post.createFilenameInput(customFilename, postId, color, defaultFilename) : null,
-                        ui.forms.config.post.createMediaTypeLabel(),
-                        ui.forms.config.post.createMediaImagesCheckbox(postId, settings.media.images),
-                        ui.forms.config.post.createMediaVideosCheckbox(postId, settings.media.videos),
                         settingsHeading,
                         !window.isFF ? ui.forms.config.post.createZippedCheckbox(postId, settings.zipped) : null,
                         ui.forms.config.post.createFlattenCheckbox(postId, settings.flatten),
@@ -1281,27 +1211,6 @@ const ui = {
                                     }
                                 });
                             }
-
-                            const mediaImagesCB = h.element(`#settings-${postId}-media-images`);
-                            const mediaVideosCB = h.element(`#settings-${postId}-media-videos`);
-
-                            const enforceMedia = () => {
-                                if (!mediaImagesCB.checked && !mediaVideosCB.checked) {
-                                    mediaImagesCB.checked = true;
-                                }
-                                settings.media.images = mediaImagesCB.checked;
-                                settings.media.videos = mediaVideosCB.checked;
-                            };
-
-                            mediaImagesCB.addEventListener('change', () => {
-                                enforceMedia();
-                            });
-
-                            mediaVideosCB.addEventListener('change', () => {
-                                enforceMedia();
-                            });
-
-                            enforceMedia();
 
                             let prevSettings = JSON.parse(JSON.stringify(settings));
 
@@ -1528,7 +1437,7 @@ const hosts = [
     ['Pixhost:image', [/(t|img)(\d+)?\.pixhost.to\//, /pixhost.to\/gallery\//]],
     ['Imagebam:image', [/imagebam.com\/(view|gallery)/]],
     ['Imagebam:full embed', [/images\d.imagebam.com/]],
-    ['Saint:video', [/(saint2.(su|pk|cr)\/embed\/|([~an@]+\.)?saint2.(su|pk|cr)\/videos)/]],
+    ['turbovid:video', [/(turbovid.(cr)\/embed\/|([~an@]+\.)?turbovid.(cr)\/videos)/]],
     ['Redgifs:video', [/!!redgifs.com(\/|\\\/)ifr.*?(?="|&quot;)/]],
     ['Bunkr:',
         [
@@ -2355,11 +2264,14 @@ const resolvers = [
             };
         },
     ],
-    [[/([~an@]+\.)?saint2.(su|pk|cr)\/videos/], async url => url],
+    [[/([~an@]+\.)?turbovid.(cr)\/videos/], async url => url],
     [[/public.onlyfans.com\/files/], async url => url],
     [
-        [/saint2.(su|pk|cr)\/embed/],
+        [/turbovid.(cr)\/embed/],
         async (url, http) => {
+            // Replace turbovid.cr with saint2.su
+            url = url.replace('turbovid.cr', 'saint2.su');
+
             const { dom } = await http.get(url);
             return dom.querySelector('source')?.getAttribute('src');
         },
@@ -2656,13 +2568,9 @@ const setProcessing = (isProcessing, postId) => {
 };
 
 const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, getSettingsCB, statusUI, callbacks = {}) => {
-    const { postId, postNumber, postDate } = parsedPost;
-    const postIndex = String(postNumber).replace(/,/g, '').padStart(6, '0');
-    const datePrefix = postDate ? `${postDate} - ` : '';
-    const postLabel = postDate ? `${postDate} - ${postNumber}` : postNumber;
+    const { postId, postNumber } = parsedPost;
 
     const postSettings = getSettingsCB();
-
 
     const enabledHosts = enabledHostsCB(parsedHosts);
 
@@ -2767,9 +2675,6 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
                     }
 
                     if (h.isObject(url)) {
-                        if (!h.media.isAllowed(url.url, postSettings.media)) {
-                            return;
-                        }
                         resolved.push({
                             url: url.url,
                             host,
@@ -2778,9 +2683,6 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
                         });
                         log.post.info(postId, `::Resolved::: ${url.url}`, postNumber);
                     } else {
-                        if (!h.media.isAllowed(url, postSettings.media)) {
-                            return;
-                        }
                         resolved.push({
                             url,
                             host,
@@ -2853,17 +2755,12 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
 
     const isFF = window.isFF;
 
-if (!postSettings.skipDownload) {
-    const resources = resolved.filter(r => r.url);
-    totalDownloadable = resources.length;
+    if (!postSettings.skipDownload) {
+        const resources = resolved.filter(r => r.url);
+        totalDownloadable = resources.length;
 
-    resources.forEach((r, i) => {
-        r.fileIndex = i + 1;
-    });
-
-    // Limit bunkr links to a single concurrent download.
-    let batchLength = resolved.some(file => /(bunkrr?\.\w+)|(bunkr-cache)/.test(file.url)) ? 1 : 2;
-
+        // Limit bunkr links to a single concurrent download.
+        let batchLength = resolved.some(file => /(bunkrr?\.\w+)|(bunkr-cache)/.test(file.url)) ? 1 : 2;
 
         let currentBatch = 0;
 
@@ -2885,12 +2782,12 @@ if (!postSettings.skipDownload) {
 
         let completedBatchedDownloads = 0;
 
-     let batch = getNextBatch();
+        let batch = getNextBatch();
 
-while (batch.length) {
-    for (const { url, host, original, folderName, fileIndex } of batch) {
-        h.ui.setElProps(statusLabel, { fontWeight: 'normal' });
-        var reflink = original;
+        while (batch.length) {
+            for (const { url, host, original, folderName } of batch) {
+                h.ui.setElProps(statusLabel, { fontWeight: 'normal' });
+                var reflink = original;
                 if (url.includes('bunkr')){
                     reflink = "https://bunkr.si"
                 }
@@ -2953,7 +2850,7 @@ while (batch.length) {
                         });
 
                         // TODO: Extract to method.
-                                              const filename = filenames.find(f => f.url === url);
+                        const filename = filenames.find(f => f.url === url);
 
                         let basename;
 
@@ -2995,7 +2892,7 @@ while (batch.length) {
                             }
                         }
 
-                        const originalBase = basename;
+                        const original = basename;
 
                         if (filenames.find(f => f.original === basename)) {
                             const count = filenames.filter(f => f.original === basename).length;
@@ -3003,34 +2900,27 @@ while (batch.length) {
                         }
 
                         if (!filename) {
-                            filenames.push({ url, name: basename, original: originalBase });
+                            filenames.push({ url, name: basename, original });
                         }
-
-                        const fileIndexPadded = String(fileIndex).padStart(6, '0');
 
                         const folder = folderName || '';
 
-                        const postFolder = postLabel;
-
-                        let saveBasename = `${postFolder}_${fileIndexPadded}.${ext}`;
-
-                        let fn = `${postFolder}/${saveBasename}`;
+                        let fn = basename;
 
                         if (!postSettings.flatten && folder && folder.trim() !== '') {
-                            fn = `${postFolder}/${folder}/${saveBasename}`;
+                            fn = `${folder}/${basename}`;
                         }
 
                         log.separator(postId);
                         log.post.info(postId, `::Completed::: ${url}`, postNumber);
 
                         if (folder && folder.trim() !== '') {
-                            log.post.info(postId, `::Saving as::: ${saveBasename} ::to:: ${folder}`, postNumber);
+                            log.post.info(postId, `::Saving as::: ${basename} ::to:: ${folder}`, postNumber);
                         } else {
-                            log.post.info(postId, `::Saving as::: ${saveBasename}`, postNumber);
+                            log.post.info(postId, `::Saving as::: ${basename}`, postNumber);
                         }
 
                         let blob = URL.createObjectURL(response.response);
-
 
                         let title = threadTitle.replace(/[\\\/]/g, settings.naming.invalidCharSubstitute);
 
@@ -3059,7 +2949,8 @@ while (batch.length) {
                         }
 
                         if (isFF || postSettings.zipped) {
-                            zip.file(fn, response.response);                        }
+                            zip.file(fn, response.response);
+                        }
                     },
                     onerror: () => {
                         completed++;
@@ -3115,7 +3006,8 @@ while (batch.length) {
 
     if (totalDownloadable > 0) {
         let title = threadTitle.replace(/[\\\/]/g, settings.naming.invalidCharSubstitute);
-        const filename = customFilename ? `${datePrefix}${customFilename}` : `${postLabel}.zip`;
+        const filename = customFilename || `${title} #${postNumber}.zip`;
+
         log.separator(postId);
         log.post.info(postId, `::Preparing zip::`, postNumber);
 
@@ -3151,7 +3043,7 @@ while (batch.length) {
         if (!isFF && postSettings.zipped) {
             GM_download({
                 url: URL.createObjectURL(blob),
-                    name: `${title}/${postLabel}.zip`,
+                name: `${title}/#${postNumber}.zip`,
                 onload: () => {
                     blob = null;
                 },
@@ -3171,7 +3063,7 @@ while (batch.length) {
                 let url = URL.createObjectURL(blob);
                 GM_download({
                     url,
-                    name: `${title}/post-${postIndex}/generated.zip`,
+                    name: `${title}/#${postNumber}/generated.zip`,
                     onload: () => {
                         blob = null;
                     },
@@ -3350,158 +3242,7 @@ const selectedPosts = [];
 
         init.injectCustomStyles();
 
-        let pageSettings = {
-            media: {
-                images: true,
-                videos: false,
-            },
-        };
-
-        let btnDownloadPage = null;
-
-        const buildDownloadPageHtml = () => {
-            const color = ui.getTooltipBackgroundColor();
-
-            let html = ui.forms.createCheckbox('config-toggle-all-posts', settings.ui.checkboxes.toggleAllCheckboxLabel, false);
-
-            html = `${ui.forms.createRow(ui.forms.createLabel('Media Type'))} ${ui.forms.createCheckbox('config-page-media-images', 'Images', pageSettings.media.images)}${ui.forms.createCheckbox('config-page-media-videos', 'Videos', pageSettings.media.videos)}${ui.forms.createRow(ui.forms.createLabel('Post Selection'))} ${html}`;
-
-            parsedPosts
-                .filter(p => p.parsedHosts.length)
-                .forEach(post => {
-                const { postId, postNumber, textContent } = post.parsedPost;
-
-                if (!selectedPosts.find(s => s.post.parsedPost.postId === postId)) {
-                    selectedPosts.push({ post, enabled: false });
-                }
-
-                const threadTitle = parsers.thread.parseTitle();
-
-                let defaultPostContent = textContent.trim().replace('​', '');
-
-                const ellipsedText = h.limit(defaultPostContent === '' ? threadTitle : defaultPostContent, 20);
-
-                const summary = `<a id="post-content-${postId}" href="#post-${postId}" style="color: dodgerblue"> ${ellipsedText} </a>`;
-                html += ui.forms.createCheckbox(`config-download-post-${postId}`, `Post #${postNumber} ${summary}`, false);
-            });
-
-            return ui.forms.config.page.createForm(color, html);
-        };
-
-        const ensureDownloadPageUI = () => {
-            if (!btnDownloadPage && parsedPosts.filter(p => p.parsedHosts.length).length > 0) {
-                btnDownloadPage = addDownloadPageButton();
-
-                btnDownloadPage.addEventListener('click', e => {
-                    e.preventDefault();
-
-                    selectedPosts
-                        .filter(s => s.enabled)
-                        .forEach(s => {
-                        const originalGetSettings = s.post.getSettingsCB;
-                        const originalSettings = originalGetSettings();
-                        const originalMedia = originalSettings.media;
-                        originalSettings.media = pageSettings.media;
-                        s.post.getSettingsCB = () => originalSettings;
-                        downloadPost(
-                            s.post.parsedPost,
-                            s.post.parsedHosts,
-                            s.post.enabledHostsCB,
-                            s.post.resolvers,
-                            s.post.getSettingsCB,
-                            s.post.statusUI,
-                            s.post.postDownloadCallbacks,
-                        );
-                        originalSettings.media = originalMedia;
-                        s.post.getSettingsCB = originalGetSettings;
-                    });
-                });
-
-                ui.tooltip(btnDownloadPage, buildDownloadPageHtml(), {
-                    placement: 'bottom',
-                    interactive: true,
-                    onShown: instance => {
-                        instance.setContent(buildDownloadPageHtml());
-
-                        parsedPosts
-                            .filter(p => p.parsedHosts.length)
-                            .forEach(post => {
-                            const { postId, contentContainer } = post.parsedPost;
-                            ui.tooltip(
-                                `#post-content-${postId}`,
-                                `<div style="overflow-y: auto; background: #242323; padding: 16px; width: 500px; max-height: 500px">
-                          ${contentContainer.innerHTML}
-                         </div>`,
-                                { placement: 'right', offset: [10, 15] },
-                            );
-
-                            document.querySelector(`#config-download-post-${postId}`).addEventListener('change', e => {
-                                const selectedPost = selectedPosts.find(s => s.post.parsedPost.postId === postId);
-                                selectedPost.enabled = e.target.checked;
-
-                                const checkAllCB = h.element('#config-toggle-all-posts');
-                                checkAllCB.checked = selectedPosts.filter(s => s.enabled).length === parsedPosts.filter(p => p.parsedHosts.length).length;
-                            });
-                        });
-
-                        const pageImagesCB = h.element('#config-page-media-images');
-                        const pageVideosCB = h.element('#config-page-media-videos');
-
-                        const enforcePageMedia = () => {
-                            if (!pageImagesCB.checked && !pageVideosCB.checked) {
-                                pageImagesCB.checked = true;
-                            }
-                            pageSettings.media.images = pageImagesCB.checked;
-                            pageSettings.media.videos = pageVideosCB.checked;
-                        };
-
-                        pageImagesCB.addEventListener('change', () => {
-                            enforcePageMedia();
-                        });
-
-                        pageVideosCB.addEventListener('change', () => {
-                            enforcePageMedia();
-                        });
-
-                        enforcePageMedia();
-
-                        h.element('#config-toggle-all-posts').addEventListener('change', async e => {
-                            e.preventDefault();
-
-                            const checked = e.target.checked;
-
-                            const postCheckboxes = parsedPosts
-                            .filter(p => p.parsedHosts.length)
-                            .map(p => p.parsedPost)
-                            .flatMap(p => h.element(`#config-download-post-${p.postId}`));
-
-                            const checkedPostCheckboxes = postCheckboxes.filter(e => e.checked);
-                            const unCheckedPostCheckboxes = postCheckboxes.filter(e => !e.checked);
-
-                            if (checked) {
-                                unCheckedPostCheckboxes.forEach(c => c.click());
-                            } else {
-                                checkedPostCheckboxes.forEach(c => c.click());
-                            }
-                        });
-                    },
-                });
-            }
-        };
-
-        const processPost = post => {
-            if (!post || post.dataset && post.dataset.xfpdProcessed === '1') {
-                return;
-            }
-
-            const tempParsed = parsers.thread.parsePost(post);
-            if (parsedPosts.find(p => p.parsedPost.postId === tempParsed.postId)) {
-                if (post.dataset) {
-                    post.dataset.xfpdProcessed = '1';
-                }
-                return;
-            }
-
+        h.elements('.message-attribution-opposite').forEach(post => {
             const settings = {
                 zipped: true,
                 flatten: false,
@@ -3511,16 +3252,11 @@ const selectedPosts = [];
                 skipDownload: false,
                 verifyBunkrLinks: false,
                 output: [],
-                media: {
-                    images: true,
-                    videos: false,
-                },
             };
 
-            const parsedPost = tempParsed;
+            const parsedPost = parsers.thread.parsePost(post);
 
             const { content, contentContainer } = parsedPost;
-            const postDatePrefix = parsedPost.postDate ? `${parsedPost.postDate} - ` : '';
 
             addDuplicateTabLink(post);
             addShowDownloadPageBtnLink(post);
@@ -3530,23 +3266,20 @@ const selectedPosts = [];
             const getEnabledHostsCB = parsedHosts => parsedHosts.filter(host => host.enabled);
 
             if (!parsedHosts.length) {
-                if (post.dataset) {
-                    post.dataset.xfpdProcessed = '1';
-                }
                 return;
             }
 
             const getTotalDownloadableResourcesForPostCB = parsedHosts => {
-                return parsedHosts
-                    .filter(host => host.enabled && host.resources.length)
-                    .reduce((acc, host) => acc + host.resources.filter(r => h.media.isAllowed(r, settings.media)).length, 0);
+                return parsedHosts.filter(host => host.enabled && host.resources.length).reduce((acc, host) => acc + host.resources.length, 0);
             };
 
+            // Create and attach the download button to post.
             const { btn: btnDownloadPost } = ui.buttons.addDownloadPostButton(post);
             const totalResources = parsedHosts.reduce((acc, host) => acc + host.resources.length, 0);
             const checkedLength = getTotalDownloadableResourcesForPostCB(parsedHosts);
             btnDownloadPost.innerHTML = `🡳 Download (${checkedLength}/${totalResources})`;
 
+            // Create download status / progress elements.
             const { el: statusText } = ui.labels.status.createStatusLabel();
             const filePBar = ui.pBars.createFileProgressBar();
             const totalPBar = ui.pBars.createTotalProgressBar();
@@ -3567,7 +3300,7 @@ const selectedPosts = [];
             ui.forms.config.post.createPostConfigForm(
                 parsedPost,
                 parsedHosts,
-                `${postDatePrefix}${parsedPost.postNumber}.zip`,
+                `#${parsedPost.postNumber}.zip`,
                 settings,
                 onFormSubmitCB,
                 getTotalDownloadableResourcesForPostCB,
@@ -3604,43 +3337,98 @@ const selectedPosts = [];
                 e.preventDefault();
                 downloadPost(parsedPost, parsedHosts, getEnabledHostsCB, resolvers, getSettingsCB, statusUI, postDownloadCallbacks);
             });
-
-            if (post.dataset) {
-                post.dataset.xfpdProcessed = '1';
-            }
-
-            ensureDownloadPageUI();
-        };
-
-        h.elements('.message-attribution-opposite').forEach(post => {
-            processPost(post);
         });
 
-        ensureDownloadPageUI();
+        if (parsedPosts.filter(p => p.parsedHosts.length).length > 0) {
+            const btnDownloadPage = addDownloadPageButton();
 
-        const observer = new MutationObserver(mutations => {
-            for (const mutation of mutations) {
-                if (!mutation.addedNodes || !mutation.addedNodes.length) {
-                    continue;
-                }
+            btnDownloadPage.addEventListener('click', e => {
+                e.preventDefault();
 
-                mutation.addedNodes.forEach(node => {
-                    if (!node || node.nodeType !== 1) {
-                        return;
-                    }
-
-                    if (node.matches && node.matches('.message-attribution-opposite')) {
-                        processPost(node);
-                        return;
-                    }
-
-                    if (node.querySelectorAll) {
-                        node.querySelectorAll('.message-attribution-opposite').forEach(p => processPost(p));
-                    }
+                selectedPosts
+                    .filter(s => s.enabled)
+                    .forEach(s => {
+                    downloadPost(
+                        s.post.parsedPost,
+                        s.post.parsedHosts,
+                        s.post.enabledHostsCB,
+                        s.post.resolvers,
+                        s.post.getSettingsCB,
+                        s.post.statusUI,
+                        s.post.postDownloadCallbacks,
+                    );
                 });
-            }
-        });
+            });
 
-        observer.observe(document.body, { childList: true, subtree: true });
+            // TODO: Extract to ui.js
+            const color = ui.getTooltipBackgroundColor();
+
+            let html = ui.forms.createCheckbox('config-toggle-all-posts', settings.ui.checkboxes.toggleAllCheckboxLabel, false);
+
+            parsedPosts
+                .filter(p => p.parsedHosts.length)
+                .forEach(post => {
+                const { postId, postNumber, textContent } = post.parsedPost;
+
+                selectedPosts.push({ post, enabled: false });
+
+                const threadTitle = parsers.thread.parseTitle();
+
+                let defaultPostContent = textContent.trim().replace('​', '');
+
+                const ellipsedText = h.limit(defaultPostContent === '' ? threadTitle : defaultPostContent, 20);
+
+                const summary = `<a id="post-content-${postId}" href="#post-${postId}" style="color: dodgerblue"> ${ellipsedText} </a>`;
+                html += ui.forms.createCheckbox(`config-download-post-${postId}`, `Post #${postNumber} ${summary}`, false);
+            });
+
+            html = `${ui.forms.createRow(ui.forms.createLabel('Post Selection'))} ${html}`;
+            ui.tooltip(btnDownloadPage, ui.forms.config.page.createForm(color, html), {
+                placement: 'bottom',
+                interactive: true,
+                onShown: () => {
+                    parsedPosts
+                        .filter(p => p.parsedHosts.length)
+                        .forEach(post => {
+                        const { postId, contentContainer } = post.parsedPost;
+                        ui.tooltip(
+                            `#post-content-${postId}`,
+                            `<div style="overflow-y: auto; background: #242323; padding: 16px; width: 500px; max-height: 500px">
+                          ${contentContainer.innerHTML}
+                         </div>`,
+                            { placement: 'right', offset: [10, 15] },
+                        );
+
+                        document.querySelector(`#config-download-post-${postId}`).addEventListener('change', e => {
+                            const selectedPost = selectedPosts.find(s => s.post.parsedPost.postId === postId);
+                            selectedPost.enabled = e.target.checked;
+
+                            const checkAllCB = h.element('#config-toggle-all-posts');
+                            checkAllCB.checked = selectedPosts.filter(s => s.enabled).length === parsedPosts.length;
+                        });
+
+                        h.element('#config-toggle-all-posts').addEventListener('change', async e => {
+                            e.preventDefault();
+
+                            const checked = e.target.checked;
+
+                            const postCheckboxes = parsedPosts
+                            .filter(p => p.parsedHosts.length)
+                            .map(p => p.parsedPost)
+                            .flatMap(p => h.element(`#config-download-post-${p.postId}`));
+
+                            const checkedPostCheckboxes = postCheckboxes.filter(e => e.checked);
+                            const unCheckedPostCheckboxes = postCheckboxes.filter(e => !e.checked);
+
+                            if (checked) {
+                                unCheckedPostCheckboxes.forEach(c => c.click());
+                            } else {
+                                checkedPostCheckboxes.forEach(c => c.click());
+                            }
+                        });
+                    });
+                },
+            });
+        }
     });
 })();
