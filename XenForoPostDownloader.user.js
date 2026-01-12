@@ -278,6 +278,28 @@ const h = {
         return !path || path.indexOf('.') < 0 ? null : path.split('.').reverse()[0];
     },
     /**
+   * @param {Date} date
+   * @returns {string}
+   */
+    formatPostDate: date => {
+        const normalizedDate = date instanceof Date && !isNaN(date) ? date : new Date();
+        const year = String(normalizedDate.getFullYear()).slice(-2);
+        const month = String(normalizedDate.getMonth() + 1).padStart(2, '0');
+        const day = String(normalizedDate.getDate()).padStart(2, '0');
+        return `${year}${month}${day}`;
+    },
+    /**
+   * @param {Date} postDate
+   * @param {string} threadTitle
+   * @param {string} postNumber
+   * @returns {string}
+   */
+    buildPostBaseName: (postDate, threadTitle, postNumber) => {
+        const safeThreadTitle = threadTitle.replace(/[\\\/]/g, settings.naming.invalidCharSubstitute);
+        const formattedDate = h.formatPostDate(postDate);
+        return `${formattedDate} - ${safeThreadTitle} - simpcity post_${postNumber}`;
+    },
+    /**
    * @param element
    * @returns {string}
    */
@@ -632,6 +654,17 @@ const parsers = {
             const messageContent = post.parentNode.parentNode.querySelector('.message-content > .message-userContent');
             const footer = post.parentNode.parentNode.querySelector('footer');
             const messageContentClone = messageContent.cloneNode(true);
+            const timeEl = post.querySelector('time') || post.parentNode.querySelector('time') || post.parentNode.parentNode.querySelector('time');
+            let postDate = null;
+            if (timeEl) {
+                const unixTime = timeEl.getAttribute('data-time');
+                if (unixTime) {
+                    postDate = new Date(Number(unixTime) * 1000);
+                } else {
+                    const dateTime = timeEl.getAttribute('datetime');
+                    postDate = dateTime ? new Date(dateTime) : null;
+                }
+            }
 
             const postIdAnchor = post.querySelector('li:last-of-type > a');
             const postId = /(?<=\/post-).*/i.exec(postIdAnchor.getAttribute('href'))[0];
@@ -694,6 +727,7 @@ const parsers = {
                 postId,
                 postNumber,
                 pageNumber,
+                postDate,
                 spoilers,
                 footer,
                 content: postContent,
@@ -2725,6 +2759,8 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
     log.separator(postId);
 
     const threadTitle = parsers.thread.parseTitle();
+    const threadFolder = threadTitle.replace(/[\\\/]/g, settings.naming.invalidCharSubstitute);
+    const postBaseName = h.buildPostBaseName(parsedPost.postDate, threadTitle, postNumber);
 
     let customFilename = postSettings.output.find(o => o.postId === postId)?.value;
 
@@ -2756,7 +2792,10 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
     const isFF = window.isFF;
 
     if (!postSettings.skipDownload) {
-        const resources = resolved.filter(r => r.url);
+        const resources = resolved.filter(r => r.url).map((resource, index) => ({
+            ...resource,
+            postIndex: index + 1,
+        }));
         totalDownloadable = resources.length;
 
         // Limit bunkr links to a single concurrent download.
@@ -2785,7 +2824,7 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
         let batch = getNextBatch();
 
         while (batch.length) {
-            for (const { url, host, original, folderName } of batch) {
+            for (const { url, host, original, folderName, postIndex } of batch) {
                 h.ui.setElProps(statusLabel, { fontWeight: 'normal' });
                 var reflink = original;
                 if (url.includes('bunkr')){
@@ -2905,24 +2944,25 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
 
                         const folder = folderName || '';
 
-                        let fn = basename;
+                        const indexPrefix = String(postIndex || 0).padStart(6, '0');
+                        const indexedBasename = `${indexPrefix} - ${basename}`;
+
+                        let fn = indexedBasename;
 
                         if (!postSettings.flatten && folder && folder.trim() !== '') {
-                            fn = `${folder}/${basename}`;
+                            fn = `${folder}/${indexedBasename}`;
                         }
 
                         log.separator(postId);
                         log.post.info(postId, `::Completed::: ${url}`, postNumber);
 
                         if (folder && folder.trim() !== '') {
-                            log.post.info(postId, `::Saving as::: ${basename} ::to:: ${folder}`, postNumber);
+                            log.post.info(postId, `::Saving as::: ${indexedBasename} ::to:: ${folder}`, postNumber);
                         } else {
-                            log.post.info(postId, `::Saving as::: ${basename}`, postNumber);
+                            log.post.info(postId, `::Saving as::: ${indexedBasename}`, postNumber);
                         }
 
                         let blob = URL.createObjectURL(response.response);
-
-                        let title = threadTitle.replace(/[\\\/]/g, settings.naming.invalidCharSubstitute);
 
                         // https://stackoverflow.com/a/53681022
                         fn = fn.replace(/[\x00-\x08\x0E-\x1F\x7F-\uFFFF]/g, '');
@@ -2931,7 +2971,7 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
                             fn = `${fn}`;
                         }
 
-                        const saveAs = `${title}/${fn}`;
+                        const saveAs = `${threadFolder}/${postBaseName}/${fn}`;
 
                         if (!isFF && !postSettings.zipped) {
                             GM_download({
@@ -3005,8 +3045,7 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
     }
 
     if (totalDownloadable > 0) {
-        let title = threadTitle.replace(/[\\\/]/g, settings.naming.invalidCharSubstitute);
-        const filename = customFilename || `${title} #${postNumber}.zip`;
+        const filename = customFilename || `${postBaseName}.zip`;
 
         log.separator(postId);
         log.post.info(postId, `::Preparing zip::`, postNumber);
@@ -3043,7 +3082,7 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
         if (!isFF && postSettings.zipped) {
             GM_download({
                 url: URL.createObjectURL(blob),
-                name: `${title}/#${postNumber}.zip`,
+                name: `${threadFolder}/${postBaseName}.zip`,
                 onload: () => {
                     blob = null;
                 },
@@ -3063,7 +3102,7 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
                 let url = URL.createObjectURL(blob);
                 GM_download({
                     url,
-                    name: `${title}/#${postNumber}/generated.zip`,
+                    name: `${threadFolder}/${postBaseName}/generated.zip`,
                     onload: () => {
                         blob = null;
                     },
@@ -3300,7 +3339,7 @@ const selectedPosts = [];
             ui.forms.config.post.createPostConfigForm(
                 parsedPost,
                 parsedHosts,
-                `#${parsedPost.postNumber}.zip`,
+                `${h.buildPostBaseName(parsedPost.postDate, parsers.thread.parseTitle(), parsedPost.postNumber)}.zip`,
                 settings,
                 onFormSubmitCB,
                 getTotalDownloadableResourcesForPostCB,
