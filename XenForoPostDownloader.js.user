@@ -2659,8 +2659,7 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
     const { postId, postNumber, postDate } = parsedPost;
     const postIndex = String(postNumber).replace(/,/g, '').padStart(6, '0');
     const datePrefix = postDate ? `${postDate} - ` : '';
-    const postLabel = `${postNumber} - post`;
-    const postLabelWithDate = postDate ? `${postDate} - ${postLabel}` : postLabel;
+    const postLabel = postDate ? `${postDate} - ${postNumber}` : postNumber;
 
     const postSettings = getSettingsCB();
 
@@ -3011,7 +3010,7 @@ while (batch.length) {
 
                         const folder = folderName || '';
 
-                        const postFolder = postLabelWithDate;
+                        const postFolder = postLabel;
 
                         let saveBasename = `${postFolder}_${fileIndexPadded}.${ext}`;
 
@@ -3116,7 +3115,7 @@ while (batch.length) {
 
     if (totalDownloadable > 0) {
         let title = threadTitle.replace(/[\\\/]/g, settings.naming.invalidCharSubstitute);
-        const filename = customFilename ? `${datePrefix}${customFilename}` : `${postLabelWithDate}.zip`;
+        const filename = customFilename ? `${datePrefix}${customFilename}` : `${postLabel}.zip`;
         log.separator(postId);
         log.post.info(postId, `::Preparing zip::`, postNumber);
 
@@ -3152,7 +3151,7 @@ while (batch.length) {
         if (!isFF && postSettings.zipped) {
             GM_download({
                 url: URL.createObjectURL(blob),
-                    name: `${title}/${postLabelWithDate}.zip`,
+                    name: `${title}/${postLabel}.zip`,
                 onload: () => {
                     blob = null;
                 },
@@ -3568,7 +3567,7 @@ const selectedPosts = [];
             ui.forms.config.post.createPostConfigForm(
                 parsedPost,
                 parsedHosts,
-                `${postDatePrefix}post-${String(parsedPost.postNumber).replace(/,/g, '').padStart(6, '0')}.zip`,
+                `${postDatePrefix}${parsedPost.postNumber}.zip`,
                 settings,
                 onFormSubmitCB,
                 getTotalDownloadableResourcesForPostCB,
