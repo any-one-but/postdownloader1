@@ -2659,6 +2659,8 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
     const { postId, postNumber, postDate } = parsedPost;
     const postIndex = String(postNumber).replace(/,/g, '').padStart(6, '0');
     const datePrefix = postDate ? `${postDate} - ` : '';
+    const postLabel = `${postNumber} - post`;
+    const postLabelWithDate = postDate ? `${postDate} - ${postLabel}` : postLabel;
 
     const postSettings = getSettingsCB();
 
@@ -3009,9 +3011,9 @@ while (batch.length) {
 
                         const folder = folderName || '';
 
-                        const postFolder = `post-${postIndex}`;
+                        const postFolder = postLabelWithDate;
 
-                        let saveBasename = `${datePrefix}${postFolder}_${fileIndexPadded}.${ext}`;
+                        let saveBasename = `${postFolder}_${fileIndexPadded}.${ext}`;
 
                         let fn = `${postFolder}/${saveBasename}`;
 
@@ -3114,7 +3116,7 @@ while (batch.length) {
 
     if (totalDownloadable > 0) {
         let title = threadTitle.replace(/[\\\/]/g, settings.naming.invalidCharSubstitute);
-        const filename = customFilename ? `${datePrefix}${customFilename}` : `${datePrefix}${title} post-${postIndex}.zip`;
+        const filename = customFilename ? `${datePrefix}${customFilename}` : `${postLabelWithDate}.zip`;
         log.separator(postId);
         log.post.info(postId, `::Preparing zip::`, postNumber);
 
@@ -3150,7 +3152,7 @@ while (batch.length) {
         if (!isFF && postSettings.zipped) {
             GM_download({
                 url: URL.createObjectURL(blob),
-                    name: `${title}/${datePrefix}post-${postIndex}.zip`,
+                    name: `${title}/${postLabelWithDate}.zip`,
                 onload: () => {
                     blob = null;
                 },
