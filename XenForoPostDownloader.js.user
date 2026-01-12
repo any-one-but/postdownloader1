@@ -667,6 +667,27 @@ const parsers = {
             const postIdAnchor = post.querySelector('li:last-of-type > a');
             const postId = /(?<=\/post-).*/i.exec(postIdAnchor.getAttribute('href'))[0];
             const postNumber = postIdAnchor.textContent.replace('#', '').replace(/,/g, '').trim();
+            const timeEl = post.closest('.message-attribution')?.querySelector('time');
+            let postDate = null;
+
+            if (timeEl) {
+                const datetime = timeEl.getAttribute('datetime');
+                const timestamp = timeEl.getAttribute('data-time');
+                let dateObj = null;
+
+                if (timestamp && /^\d+$/.test(timestamp)) {
+                    dateObj = new Date(Number(timestamp) * 1000);
+                } else if (datetime) {
+                    dateObj = new Date(datetime);
+                }
+
+                if (dateObj && !Number.isNaN(dateObj.getTime())) {
+                    const year = String(dateObj.getFullYear()).slice(-2);
+                    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    const day = String(dateObj.getDate()).padStart(2, '0');
+                    postDate = `${year}${month}${day}`;
+                }
+            }
             // Remove the following from the post content:
             // 1. Quotes.
             // 2. CodeBlock headers
@@ -723,6 +744,7 @@ const parsers = {
                 post,
                 postId,
                 postNumber,
+                postDate,
                 pageNumber,
                 spoilers,
                 footer,
@@ -2634,8 +2656,9 @@ const setProcessing = (isProcessing, postId) => {
 };
 
 const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, getSettingsCB, statusUI, callbacks = {}) => {
-    const { postId, postNumber } = parsedPost;
+    const { postId, postNumber, postDate } = parsedPost;
     const postIndex = String(postNumber).replace(/,/g, '').padStart(6, '0');
+    const datePrefix = postDate ? `${postDate} - ` : '';
 
     const postSettings = getSettingsCB();
 
@@ -2988,7 +3011,7 @@ while (batch.length) {
 
                         const postFolder = `post-${postIndex}`;
 
-                        let saveBasename = `${postFolder}_${fileIndexPadded}.${ext}`;
+                        let saveBasename = `${datePrefix}${postFolder}_${fileIndexPadded}.${ext}`;
 
                         let fn = `${postFolder}/${saveBasename}`;
 
@@ -3091,7 +3114,7 @@ while (batch.length) {
 
     if (totalDownloadable > 0) {
         let title = threadTitle.replace(/[\\\/]/g, settings.naming.invalidCharSubstitute);
-        const filename = customFilename || `${title} post-${postIndex}.zip`;
+        const filename = customFilename ? `${datePrefix}${customFilename}` : `${datePrefix}${title} post-${postIndex}.zip`;
         log.separator(postId);
         log.post.info(postId, `::Preparing zip::`, postNumber);
 
@@ -3127,7 +3150,7 @@ while (batch.length) {
         if (!isFF && postSettings.zipped) {
             GM_download({
                 url: URL.createObjectURL(blob),
-                name: `${title}/post-${postIndex}.zip`,
+                    name: `${title}/${datePrefix}post-${postIndex}.zip`,
                 onload: () => {
                     blob = null;
                 },
@@ -3496,6 +3519,7 @@ const selectedPosts = [];
             const parsedPost = tempParsed;
 
             const { content, contentContainer } = parsedPost;
+            const postDatePrefix = parsedPost.postDate ? `${parsedPost.postDate} - ` : '';
 
             addDuplicateTabLink(post);
             addShowDownloadPageBtnLink(post);
@@ -3542,7 +3566,7 @@ const selectedPosts = [];
             ui.forms.config.post.createPostConfigForm(
                 parsedPost,
                 parsedHosts,
-                `post-${String(parsedPost.postNumber).replace(/,/g, '').padStart(6, '0')}.zip`,
+                `${postDatePrefix}post-${String(parsedPost.postNumber).replace(/,/g, '').padStart(6, '0')}.zip`,
                 settings,
                 onFormSubmitCB,
                 getTotalDownloadableResourcesForPostCB,
