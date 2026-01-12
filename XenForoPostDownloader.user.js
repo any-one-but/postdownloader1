@@ -2782,6 +2782,7 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
     log.separator(postId);
 
     const threadTitle = parsers.thread.parseTitle();
+    const safeThreadTitle = threadTitle.replace(/[\\\/]/g, settings.naming.invalidCharSubstitute).trim();
     const postTitle = h.buildPostTitle(parsedPost.postDate, threadTitle, postNumber);
 
     let customFilename = postSettings.output.find(o => o.postId === postId)?.value;
@@ -2964,7 +2965,7 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
 
                         const folder = folderName || '';
 
-                        const indexedBasename = `${h.padNumber(index, 6)} ${basename}`;
+                        const indexedBasename = `${h.padNumber(index, 6)} - ${basename}`;
                         let fn = indexedBasename;
 
                         if (!postSettings.flatten && folder && folder.trim() !== '') {
@@ -2989,7 +2990,7 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
                             fn = `${fn}`;
                         }
 
-                        const saveAs = `${postTitle}/${fn}`;
+                        const saveAs = `${safeThreadTitle}/${postTitle}/${fn}`;
 
                         if (!isFF && !postSettings.zipped) {
                             GM_download({
@@ -3064,6 +3065,9 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
 
     if (totalDownloadable > 0) {
         const filename = customFilename || `${postTitle}.zip`;
+        const downloadZipName = filename.startsWith(`${safeThreadTitle}/`)
+            ? filename
+            : `${safeThreadTitle}/${filename}`;
 
         log.separator(postId);
         log.post.info(postId, `::Preparing zip::`, postNumber);
@@ -3093,14 +3097,14 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
         let blob = await zip.generateAsync({ type: 'blob' });
 
         if (isFF) {
-            saveAs(blob, filename);
+            saveAs(blob, downloadZipName);
             setProcessing(false, postId);
         }
 
         if (!isFF && postSettings.zipped) {
             GM_download({
                 url: URL.createObjectURL(blob),
-                name: filename,
+                name: downloadZipName,
                 onload: () => {
                     blob = null;
                 },
@@ -3108,7 +3112,7 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
                     console.log(`Error writing file to disk. There may be more details below.`);
                     console.log(response);
                     console.log('Trying to write using JSZip...');
-                    saveAs(blob, filename);
+                    saveAs(blob, downloadZipName);
                     setProcessing(false, postId);
                     console.log('Done!');
                 },
@@ -3120,7 +3124,7 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
                 let url = URL.createObjectURL(blob);
                 GM_download({
                     url,
-                    name: `${postTitle}/generated.zip`,
+                    name: `${safeThreadTitle}/${postTitle}/generated.zip`,
                     onload: () => {
                         blob = null;
                     },
@@ -3313,6 +3317,7 @@ const selectedPosts = [];
 
             const parsedPost = parsers.thread.parsePost(post);
             const threadTitle = parsers.thread.parseTitle();
+            const safeThreadTitle = threadTitle.replace(/[\\\/]/g, settings.naming.invalidCharSubstitute).trim();
             const postTitle = h.buildPostTitle(parsedPost.postDate, threadTitle, parsedPost.postNumber);
 
             const { content, contentContainer } = parsedPost;
@@ -3359,7 +3364,7 @@ const selectedPosts = [];
             ui.forms.config.post.createPostConfigForm(
                 parsedPost,
                 parsedHosts,
-                `${postTitle}.zip`,
+                `${safeThreadTitle}/${postTitle}.zip`,
                 settings,
                 onFormSubmitCB,
                 getTotalDownloadableResourcesForPostCB,
